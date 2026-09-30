@@ -66,7 +66,38 @@ def _register_windows_cuda_dlls() -> None:
         pass
 
 
+def _preload_linux_cuda_libs() -> None:
+    """Load pip-installed cublas/cudnn so ctranslate2 can find them on Linux.
+
+    The nvidia-*-cu12 wheels put their .so files under site-packages/nvidia/*/lib,
+    which is not on the loader's search path, so ctranslate2 reports a GPU and
+    then fails with "libcublas.so.12 is not found". Loading them by absolute path
+    with RTLD_GLOBAL makes the later dlopen-by-soname succeed, without asking the
+    user to export LD_LIBRARY_PATH in every launcher.
+    """
+    if sys.platform != "linux":
+        return
+    try:
+        import ctypes
+        import site
+
+        # cublas first: cudnn's engine libs depend on it.
+        for lib in ("cublas/lib/libcublasLt.so.12", "cublas/lib/libcublas.so.12",
+                    "cudnn/lib/libcudnn.so.9"):
+            for base in site.getsitepackages():
+                path = Path(base) / "nvidia" / lib
+                if path.exists():
+                    try:
+                        ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL)
+                    except OSError:
+                        pass
+                    break
+    except Exception:                              # noqa: BLE001 - best effort
+        pass
+
+
 _register_windows_cuda_dlls()
+_preload_linux_cuda_libs()
 
 
 def is_apple_silicon() -> bool:
