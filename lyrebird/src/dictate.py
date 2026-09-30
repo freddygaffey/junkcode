@@ -30,7 +30,9 @@ import argparse
 import configparser
 import os
 import queue
+import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -148,11 +150,62 @@ _CLEANER = None
 STATE_HOOK = None
 
 
+# Where the i3 bar looks to draw a recording indicator. XDG_RUNTIME_DIR is
+# tmpfs and cleared at logout, so a stale "recording" cannot outlive the session.
+STATE_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir())) / "lyrebird.state"
+
+# Distinct cues, so start and stop cannot be confused by ear.
+_SOUNDS = {"listening": "message-new-instant.oga", "idle": "complete.oga"}
+
+
+def _play(name: str) -> None:
+    path = f"/usr/share/sounds/freedesktop/stereo/{name}"
+    if not os.path.exists(path):
+        return
+    for player in ("paplay", "pw-play", "aplay"):
+        if shutil.which(player):
+            try:
+                # Detached and discarded: dictation must never block on audio.
+                subprocess.Popen([player, path],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
+            return
+
+
 def _set_state(state: str) -> None:
+    """Publish what the mic is doing: menu bar, status bar, sound, notification.
+
+    Toggle-mode dictation with no feedback is unusable — nothing tells you the
+    mic is live, so you either talk to a mic that is not listening or leave it
+    recording after you walk away. Everything here is best-effort: a missing
+    sound theme or notification daemon must never break dictation.
+    """
     if STATE_HOOK is not None:
         try:
             STATE_HOOK(state)
         except Exception:                          # noqa: BLE001 - cosmetic only
+            pass
+
+    try:
+        STATE_PATH.write_text(state)
+    except OSError:
+        pass
+
+    sound = _SOUNDS.get(state)
+    if sound:
+        _play(sound)
+
+    if state in _SOUNDS and shutil.which("notify-send"):
+        title = "\u25cf Recording" if state == "listening" else "Dictation done"
+        try:
+            # x-canonical-private-synchronous replaces the previous popup rather
+            # than stacking one per utterance.
+            subprocess.Popen(
+                ["notify-send", "-t", "1200",
+                 "-h", "string:x-canonical-private-synchronous:lyrebird", title],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
             pass
 
 
