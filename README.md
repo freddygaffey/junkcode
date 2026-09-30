@@ -90,8 +90,50 @@ never used at runtime, so it is excluded — that alone saves 511 MB.
 |---|---|---|
 | macOS (Apple Silicon) | primary | Needs Accessibility + Microphone permission |
 | macOS (Intel) | works | Slower; use `small` or `medium` model |
-| Linux | works | X11 fine. Wayland blocks global hotkeys — see docs/TROUBLESHOOTING.md |
+| Linux | works | Let your WM bind the key — see [Linux](#linux-let-the-wm-bind-the-key) |
 | Windows | works | Run PowerShell as your normal user, not admin |
+
+## Linux: let the WM bind the key
+
+On macOS and Windows, Lyrebird grabs a global hotkey itself. On Linux, don't —
+your window manager already does that job, doing it twice means two things
+fighting over one key, and `pynput`'s X11 grab doesn't work under Wayland at all.
+
+So there are two pieces:
+
+```sh
+./.venv/bin/python src/dictate.py --daemon    # resident, holds the model
+./.venv/bin/python src/dictate.py --toggle    # start/stop recording, then exits
+```
+
+The daemon exists for one reason: loading `large-v3-turbo` takes seconds, so the
+model can't be loaded per keypress. It stays warm; `--toggle` signals it
+(`SIGUSR1` via a pidfile in `$XDG_RUNTIME_DIR`) and returns immediately, so the
+keypress feels instant.
+
+Bind the key in your WM and start the daemon from the same place. i3:
+
+```
+exec --no-startup-id sh -c 'cd "$HOME/lyrebird" && exec ./.venv/bin/python src/dictate.py --daemon'
+bindsym F9 exec --no-startup-id sh -c 'cd "$HOME/lyrebird" && ./.venv/bin/python src/dictate.py --toggle'
+```
+
+Use `exec`, not `exec_always` — reloading the WM shouldn't throw away a model
+that took seconds to load.
+
+`push_to_talk` mode isn't available this way: it needs key-release events, which a
+WM binding can't hand over. The daemon runs in toggle mode and says so.
+
+Two Linux config settings that differ from the macOS defaults:
+
+```ini
+[transcription]
+backend = auto        # NOT mlx — that's the Apple Metal backend
+compute_type = int8   # several times faster than float32 on CPU
+```
+
+`backend` is returned verbatim when it isn't `auto`, so leaving `mlx` in place on
+Linux tries to load the Metal backend and fails.
 
 ## Configuration
 

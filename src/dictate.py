@@ -7,16 +7,32 @@ Pipeline:  mic -> faster-whisper (local) -> [optional] Ollama (local) -> focused
 Everything runs on this machine. Nothing is uploaded.
 
 Usage:
-    python src/dictate.py              # run the hotkey listener
+    python src/dictate.py              # grab a global hotkey (macOS, Windows)
+    python src/dictate.py --daemon     # stay resident, model loaded (Linux)
+    python src/dictate.py --toggle     # tell the daemon to start/stop, then exit
     python src/dictate.py --check      # diagnose the install, change nothing
     python src/dictate.py --once       # record one utterance, print it, exit
     python src/dictate.py --devices    # list audio input devices
+
+Two front ends, because the platforms want different things:
+
+  macOS / Windows   this process grabs a global hotkey with pynput.
+  Linux             the window manager binds the key and runs `--toggle`, which
+                    signals a resident `--daemon`. The WM already owns key
+                    binding, so grabbing one here would be a second thing
+                    fighting for the same key — and pynput's X11 grab does not
+                    work under Wayland at all. The daemon exists because loading
+                    large-v3-turbo takes seconds; it cannot happen per keypress.
 """
 from __future__ import annotations
 
 import argparse
 import configparser
+import os
+import queue
+import signal
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -237,9 +253,13 @@ def resolve_key(name: str):
     sys.exit(f"Unrecognised hotkey '{name}'. Try f5, f6, f13, cmd_r, alt_r.")
 
 
-def run_listener(cfg: configparser.ConfigParser) -> None:
-    from pynput import keyboard
+def _make_controller(cfg: configparser.ConfigParser):
+    """Build the recorder and transcriber, and return (begin, finish, state, mode).
 
+    Split out so the recording machinery is shared by both front ends:
+    `run_listener` (pynput grabs a global hotkey — macOS, Windows) and
+    `run_daemon` (the window manager owns the key and signals us — Linux).
+    """
     audio_cfg = cfg["audio"]
     recorder = Recorder(
         audio_cfg.getint("sample_rate", 16000),
@@ -258,7 +278,6 @@ def run_listener(cfg: configparser.ConfigParser) -> None:
                 st.add_audio(mono)
         recorder.on_chunk = on_chunk
 
-    hotkey = resolve_key(cfg["hotkey"].get("key", "f5"))
     mode = cfg["hotkey"].get("mode", "toggle").strip().lower()
     state = {"recording": False, "busy": False}
     lock = threading.Lock()
@@ -327,6 +346,21 @@ def run_listener(cfg: configparser.ConfigParser) -> None:
             with lock:
                 state["busy"] = False
 
+    return begin, finish, state, mode
+
+
+def run_listener(cfg: configparser.ConfigParser) -> None:
+    """Grab a global hotkey with pynput and dictate on it.
+
+    The right front end on macOS and Windows. On Linux prefer --daemon plus
+    --toggle: the window manager already owns key binding, doing it twice is
+    redundant, and pynput's X11 grab does not work under Wayland at all.
+    """
+    from pynput import keyboard
+
+    begin, finish, state, mode = _make_controller(cfg)
+    hotkey = resolve_key(cfg["hotkey"].get("key", "f5"))
+
     def on_press(key):
         if key != hotkey:
             return
@@ -342,6 +376,77 @@ def run_listener(cfg: configparser.ConfigParser) -> None:
     print(f"\nReady. Hotkey: {cfg['hotkey'].get('key')} ({mode}).  Ctrl+C to quit.\n")
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
         listener.join()
+
+
+# --------------------------------------------------------------- daemon + toggle
+# On Linux the window manager binds the key, so Lyrebird should not also grab one.
+# But the model cannot be loaded per keypress — large-v3-turbo takes seconds — so
+# something has to stay resident holding it. Hence: a daemon that keeps the model
+# warm, and a one-shot `--toggle` that signals it and exits immediately.
+#
+# Signals rather than a socket because that is all this needs: one verb, no
+# payload, no reply.
+
+def _pid_path() -> Path:
+    """Where the daemon records its pid.
+
+    XDG_RUNTIME_DIR is tmpfs and cleared on logout, so a stale file cannot
+    outlive the session it belongs to.
+    """
+    base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return Path(base) / "lyrebird.pid"
+
+
+def run_daemon(cfg: configparser.ConfigParser) -> None:
+    """Stay resident with the model loaded; toggle recording on SIGUSR1."""
+    begin, finish, state, mode = _make_controller(cfg)
+
+    if mode == "push_to_talk":
+        print("note: push_to_talk needs key-release events, which a window-manager\n"
+              "      binding cannot give us. Running in toggle mode instead.",
+              file=sys.stderr)
+
+    # The handler must not do the work: transcription takes seconds, and a signal
+    # handler blocking for that long would swallow anything arriving meanwhile.
+    # So the handler only enqueues, and the loop below does the work.
+    events: queue.Queue[str] = queue.Queue()
+    signal.signal(signal.SIGUSR1, lambda *_: events.put("toggle"))
+
+    pid_file = _pid_path()
+    pid_file.write_text(str(os.getpid()))
+    print(f"\nReady (daemon, pid {os.getpid()}). Toggle with:\n"
+          f"  {sys.executable} {__file__} --toggle\n")
+    try:
+        while True:
+            # A timeout rather than a bare blocking get(), so the loop cannot
+            # wedge if a signal lands at an awkward moment.
+            try:
+                event = events.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if event == "toggle":
+                finish() if state["recording"] else begin()
+    finally:
+        pid_file.unlink(missing_ok=True)
+
+
+def send_toggle() -> None:
+    """Signal a running daemon to start or stop recording, then exit."""
+    pid_file = _pid_path()
+    if not pid_file.exists():
+        sys.exit("No daemon running. Start one with:  dictate.py --daemon")
+    try:
+        pid = int(pid_file.read_text().strip())
+    except ValueError:
+        pid_file.unlink(missing_ok=True)
+        sys.exit("Unreadable pidfile — removed. Start the daemon again.")
+    try:
+        os.kill(pid, signal.SIGUSR1)
+    except ProcessLookupError:
+        pid_file.unlink(missing_ok=True)
+        sys.exit("Daemon is gone (stale pidfile removed). Start it again.")
+    except PermissionError:
+        sys.exit(f"pid {pid} is not ours — refusing to signal it.")
 
 
 def run_live_test(cfg: configparser.ConfigParser) -> None:
@@ -501,7 +606,16 @@ def main() -> None:
     parser.add_argument("--devices", action="store_true", help="list audio input devices")
     parser.add_argument("--live", action="store_true",
                         help="stream from the mic and print words; no typing, no permissions needed")
+    parser.add_argument("--daemon", action="store_true",
+                        help="stay resident with the model loaded; toggle via --toggle "
+                             "(use this on Linux, and let the WM bind the key)")
+    parser.add_argument("--toggle", action="store_true",
+                        help="tell a running --daemon to start/stop recording, then exit")
     args = parser.parse_args()
+
+    if args.toggle:          # before load_config: this path needs nothing loaded
+        send_toggle()
+        return
 
     cfg = load_config()
 
@@ -519,6 +633,9 @@ def main() -> None:
         return
     if args.once:
         run_once(cfg)
+        return
+    if args.daemon:
+        run_daemon(cfg)
         return
     run_listener(cfg)
 
