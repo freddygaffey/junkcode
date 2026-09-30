@@ -1,0 +1,76 @@
+name: Build installers
+
+# PyInstaller cannot cross-compile, so each installer is built on its own OS.
+# This is the only way to produce a Windows .exe without owning a Windows machine.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14              # Apple Silicon, so the MLX backend is included
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install dependencies
+        run: |
+          brew install portaudio
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt pyinstaller pillow
+          .venv/bin/pip install mlx-whisper mlx-lm
+      - name: Generate icon
+        run: .venv/bin/python build/make-icon.py
+      - name: Build app and dmg
+        run: ./build/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lyrebird-macOS
+          path: dist/Lyrebird.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv\Scripts\pip install --upgrade pip
+          .venv\Scripts\pip install -r requirements.txt pyinstaller pillow
+          .venv\Scripts\pip install llama-cpp-python
+        shell: cmd
+      - name: Generate icon
+        run: .venv\Scripts\python build\make-icon.py
+        shell: cmd
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+      - name: Build exe and installer
+        run: powershell -ExecutionPolicy Bypass -File .\build\build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lyrebird-Windows
+          path: |
+            dist/Lyrebird-Setup.exe
+            dist/Lyrebird/**
+
+  release:
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/Lyrebird-macOS/Lyrebird.dmg
+            artifacts/Lyrebird-Windows/Lyrebird-Setup.exe
+          generate_release_notes: true

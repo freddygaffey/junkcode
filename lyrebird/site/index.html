@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lyrebird</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Lyrebird is offline dictation for macOS, Windows and Linux. Speak, and it types into whatever app has focus — with custom vocabulary and optional grammar cleanup, entirely on your own computer. Free and open source.">
+<script>
+  (function(){
+    try{
+      var t = localStorage.getItem('lyrebird-theme');
+      if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    } catch(e){}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+
+  /* ============ Tokens — light (default) ============ */
+  :root{
+    --bg: #EFF1EE;
+    --surface: #F8F9F6;
+    --surface-2: #E4E8E1;
+    --ink: #121A18;
+    --muted: rgba(18,26,24,.66);
+    --border: rgba(18,26,24,.14);
+    --accent: #1F6F6B;
+    --accent-ink: #F7F8F5;
+    --warm: #C97B3C;
+    --warm-ink: #2B1A0E;
+    --good: #1F6F6B;
+    --bad: #B4502A;
+    --shadow: 0 1px 2px rgba(18,26,24,.06), 0 8px 24px -12px rgba(18,26,24,.18);
+
+    --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+    --maxw: 1120px;
+    --radius: 14px;
+  }
+
+  /* ============ Tokens — dark, system preference ============ */
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg: #0E1412;
+      --surface: #131B18;
+      --surface-2: #1A2320;
+      --ink: #E8EDE9;
+      --muted: rgba(232,237,233,.66);
+      --border: rgba(232,237,233,.14);
+      --accent: #4FA9A2;
+      --accent-ink: #08211D;
+      --warm: #D98C55;
+      --warm-ink: #2B1A0E;
+      --good: #4FA9A2;
+      --bad: #E08A5F;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.55);
+    }
+  }
+
+  /* ============ Tokens — dark, explicit override ============ */
+  :root[data-theme="dark"]{
+    --bg: #0E1412;
+    --surface: #131B18;
+    --surface-2: #1A2320;
+    --ink: #E8EDE9;
+    --muted: rgba(232,237,233,.66);
+    --border: rgba(232,237,233,.14);
+    --accent: #4FA9A2;
+    --accent-ink: #08211D;
+    --warm: #D98C55;
+    --warm-ink: #2B1A0E;
+    --good: #4FA9A2;
+    --bad: #E08A5F;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.55);
+  }
+
+  /* ============ Reset ============ */
+  *,*::before,*::after{ box-sizing: border-box; }
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  img,svg{ display:block; max-width:100%; }
+  a{ color: inherit; }
+  ul{ margin:0; padding:0; list-style:none; }
+  h1,h2,h3,h4{ font-family: var(--font-display); font-weight: 600; line-height: 1.12; margin: 0; }
+  p{ margin: 0; }
+  button{ font: inherit; color: inherit; background:none; border:none; cursor:pointer; }
+  code, .mono{ font-family: var(--font-mono); }
+
+  :focus-visible{
+    outline: 2.5px solid var(--warm);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  .skip-link{
+    position:absolute; left:1rem; top:-3rem;
+    background:var(--accent); color:var(--accent-ink);
+    padding:.6rem 1rem; border-radius:8px; z-index:200;
+    transition: top .15s ease;
+    font-weight:600;
+  }
+  .skip-link:focus{ top: 1rem; }
+
+  /* ============ Layout helpers ============ */
+  .wrap{ max-width: var(--maxw); margin-inline:auto; padding-inline: clamp(1.25rem, 4vw, 2.5rem); }
+  section{ padding-block: clamp(3rem, 7vw, 6rem); }
+  .eyebrow{
+    font-family: var(--font-mono); font-size: .8rem; letter-spacing:.09em; text-transform:uppercase;
+    color: var(--accent); font-weight:600; margin-bottom: .9rem; display:flex; gap:.6em; align-items:center;
+  }
+  .eyebrow::before{ content:""; width:1.6em; height:1.5px; background:var(--accent); display:inline-block; }
+  h2{ font-size: clamp(1.7rem, 3.4vw, 2.5rem); letter-spacing:-.01em; }
+  h2 + .lede, h3 + .lede{ margin-top:.9rem; }
+  .lede{ max-width:56ch; color: var(--muted); font-size: 1.05rem; }
+  .section-head{ margin-bottom: clamp(2rem, 4vw, 3rem); }
+
+  /* ============ expert-only visibility ============ */
+  .expert-only{ display:none; }
+  body[data-mode="expert"] .expert-only{ display: revert; }
+  body[data-mode="expert"] .simple-only{ display:none; }
+
+  /* ============ Header ============ */
+  header.site{
+    position: sticky; top:0; z-index:100;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px) saturate(1.1);
+    border-bottom: 1px solid var(--border);
+  }
+  .site-nav{
+    display:flex; align-items:center; gap: 1.5rem;
+    padding-block: .85rem;
+  }
+  .brand{ display:flex; align-items:center; gap:.6rem; font-family: var(--font-display); font-weight:600; font-size:1.15rem; text-decoration:none; margin-right:auto; }
+  .brand svg{ width:34px; height:34px; flex:none; }
+  .site-nav ul{ display:flex; gap:1.6rem; }
+  .site-nav a.navlink{ font-size:.94rem; font-weight:500; text-decoration:none; color:var(--muted); }
+  .site-nav a.navlink:hover{ color:var(--ink); }
+  .controls{ display:flex; align-items:center; gap:.7rem; }
+
+  .mode-toggle{
+    display:inline-flex; background:var(--surface-2); border:1px solid var(--border);
+    border-radius:999px; padding:3px; gap:2px;
+  }
+  .mode-toggle button{
+    font-size:.82rem; font-weight:600; padding:.4rem .85rem; border-radius:999px;
+    color:var(--muted);
+  }
+  .mode-toggle button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); }
+
+  .theme-toggle{
+    width:2.1rem; height:2.1rem; border-radius:999px; border:1px solid var(--border);
+    display:inline-flex; align-items:center; justify-content:center; background:var(--surface-2);
+  }
+  .theme-toggle svg{ width:1.05rem; height:1.05rem; }
+
+  .btn-download-nav{
+    background:var(--accent); color:var(--accent-ink); font-weight:600; font-size:.88rem;
+    padding:.55rem 1rem; border-radius:8px; text-decoration:none; white-space:nowrap;
+  }
+
+  @media (max-width: 760px){
+    .site-nav ul{ display:none; }
+    .btn-download-nav{ display:none; }
+  }
+
+  /* ============ Buttons ============ */
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:.55rem;
+    padding: .85rem 1.4rem; border-radius: 10px; font-weight:600; font-size:.98rem;
+    text-decoration:none; border:1px solid transparent; transition: transform .12s ease;
+  }
+  .btn:hover{ transform: translateY(-1px); }
+  .btn-primary{ background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow); }
+  .btn-ghost{ background: transparent; color: var(--ink); border-color: var(--border); }
+  .btn-ghost:hover{ background: var(--surface-2); }
+  .btn svg{ width:1.15rem; height:1.15rem; flex:none; }
+
+  /* ============ Hero ============ */
+  .hero{ padding-top: clamp(3rem, 8vw, 5.5rem); position:relative; }
+  .hero-grid{
+    display:grid; grid-template-columns: 1.05fr .95fr; gap: clamp(2rem, 5vw, 4rem); align-items:center;
+  }
+  @media (max-width: 900px){ .hero-grid{ grid-template-columns:1fr; } }
+  .hero h1{ font-size: clamp(2.3rem, 5.2vw, 3.6rem); letter-spacing:-.015em; }
+  .hero h1 em{ font-style:italic; color: var(--accent); }
+  .hero .lede{ margin-top:1.3rem; font-size:1.15rem; max-width:46ch; }
+  .hero-ctas{ display:flex; flex-wrap:wrap; gap: .9rem; margin-top: 2rem; }
+  .hero-fine{ margin-top:1.1rem; font-size:.85rem; color:var(--muted); }
+
+  .wave-card{
+    background: var(--surface); border:1px solid var(--border); border-radius: var(--radius);
+    padding: clamp(1.2rem,3vw,2rem); box-shadow: var(--shadow);
+  }
+  .wave-card .cap{ font-family: var(--font-mono); font-size:.75rem; color:var(--muted); text-align:center; letter-spacing:.03em; }
+  .wave-graphic{ width:100%; }
+  .bar{ fill: var(--accent); transform-box: fill-box; transform-origin: center; transform: scaleY(.22); transition: transform .6s cubic-bezier(.2,.8,.2,1); transition-delay: var(--d, 0s); }
+  .in-view .bar{ transform: scaleY(1); }
+  .wave-label{ fill: var(--ink); font-family: var(--font-display); font-style:italic; }
+  .wave-label{ clip-path: inset(0 100% 0 0); transition: clip-path 1s ease; transition-delay: .55s; }
+  .in-view .wave-label{ clip-path: inset(0 0 0 0); }
+  .wave-cursor{ fill: var(--warm); opacity:0; transition: opacity .2s linear; transition-delay: 1.5s; }
+  .in-view .wave-cursor{ animation: blink 1s steps(1) 1.55s infinite; }
+  @keyframes blink{ 0%,49%{ opacity:1; } 50%,100%{ opacity:0; } }
+
+  @media (prefers-reduced-motion: reduce){
+    .bar, .wave-label, .wave-cursor{ transition:none !important; animation:none !important; transform:none !important; clip-path:none !important; opacity: 1 !important; }
+  }
+
+  /* ============ Trust strip ============ */
+  .trust{ padding-block: clamp(2rem,4vw,3rem); border-top:1px solid var(--border); border-bottom:1px solid var(--border); background: var(--surface); }
+  .trust ul{ display:grid; grid-template-columns: repeat(4,1fr); gap:1.5rem; }
+  @media (max-width: 760px){ .trust ul{ grid-template-columns: repeat(2,1fr); } }
+  .trust li{ display:flex; gap:.8rem; align-items:flex-start; }
+  .trust svg{ width:1.6rem; height:1.6rem; flex:none; color: var(--accent); }
+  .trust strong{ display:block; font-size:.95rem; }
+  .trust span{ font-size:.85rem; color:var(--muted); }
+
+  /* ============ Steps ============ */
+  .steps{ display:grid; grid-template-columns: repeat(3,1fr); gap: 1.75rem; counter-reset: step; }
+  @media (max-width: 820px){ .steps{ grid-template-columns:1fr; } }
+  .step{ position:relative; padding-top: 3.4rem; }
+  .step::before{
+    counter-increment: step; content: counter(step);
+    font-family: var(--font-display); font-size:1.4rem; font-weight:600;
+    width:2.6rem; height:2.6rem; border-radius:50%; background:var(--accent); color:var(--accent-ink);
+    display:flex; align-items:center; justify-content:center; position:absolute; top:0; left:0;
+  }
+  .step h3{ font-size:1.15rem; margin-bottom:.5rem; }
+  .step p{ color:var(--muted); font-size:.96rem; }
+
+  /* ============ Feature rows ============ */
+  .feature{ display:grid; grid-template-columns: .95fr 1.05fr; gap: clamp(2rem,5vw,4rem); align-items:center; }
+  @media (max-width: 880px){ .feature{ grid-template-columns:1fr; } }
+  .feature.reverse .feature-copy{ order:2; }
+  @media (max-width: 880px){ .feature.reverse .feature-copy{ order:0; } }
+  .feature-copy h2{ margin-bottom: .9rem; }
+  .feature-copy .lede{ margin-bottom: 1.4rem; }
+
+  .tradeoff{
+    margin-top:1.4rem; padding: .95rem 1.1rem; border-radius:10px; background: var(--surface-2);
+    border-left: 3px solid var(--warm); font-size:.92rem; color: var(--ink);
+  }
+  .tradeoff strong{ color: var(--warm); }
+
+  .transcript-card{
+    background: var(--surface); border:1px solid var(--border); border-radius: var(--radius);
+    padding: clamp(1.1rem, 3vw, 1.6rem); box-shadow: var(--shadow);
+  }
+  .transcript-row{ padding-block:.7rem; }
+  .transcript-row + .transcript-row{ border-top:1px dashed var(--border); }
+  .transcript-tag{ font-family: var(--font-mono); font-size:.72rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); display:block; margin-bottom:.35rem; }
+  .transcript-row p{ font-family: var(--font-mono); font-size:.92rem; line-height:1.7; }
+  .wrong{ color: var(--bad); text-decoration: line-through wavy; text-decoration-thickness:1px; }
+  .right{ color: var(--good); font-weight:600; }
+  .transcript-row.timing{ display:flex; justify-content:space-between; align-items:baseline; gap:1rem; }
+  .transcript-row.timing .time{ font-family:var(--font-mono); font-size:.78rem; color:var(--accent); white-space:nowrap; }
+
+  /* ============ Accuracy ============ */
+  .accuracy-simple{ max-width: 62ch; }
+  .bench-table{ width:100%; border-collapse: collapse; margin-top:1.5rem; font-size:.92rem; }
+  .bench-table caption{ text-align:left; font-family:var(--font-mono); font-size:.78rem; color:var(--muted); margin-bottom:.6rem; }
+  .bench-table th, .bench-table td{ text-align:left; padding: .75rem .9rem; border-bottom:1px solid var(--border); }
+  .bench-table th{ font-family:var(--font-mono); font-size:.75rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; }
+  .bench-table td.num{ font-family:var(--font-mono); }
+  .table-scroll{ overflow-x:auto; }
+  .wer-callout{
+    margin-top:1.75rem; display:flex; gap:1.2rem; align-items:baseline; flex-wrap:wrap;
+    background: var(--surface); border:1px solid var(--border); border-radius: var(--radius); padding:1.4rem 1.6rem;
+  }
+  .wer-callout .figure{ font-family:var(--font-display); font-size:2.6rem; color:var(--accent); font-weight:600; line-height:1; }
+  .wer-callout p{ color:var(--muted); font-size:.92rem; max-width:44ch; }
+
+  /* ============ Under the hood (expert) ============ */
+  .diagram{
+    background: var(--surface); border:1px solid var(--border); border-radius: var(--radius);
+    padding: clamp(1.2rem,3vw,1.8rem); font-family: var(--font-mono); font-size:.86rem; line-height:1.85;
+    color: var(--ink); overflow-x:auto; white-space:pre;
+  }
+  .diagram .stage{ color: var(--accent); }
+  .diagram .note{ color: var(--muted); }
+
+  .hood-grid{ display:grid; grid-template-columns: repeat(2,1fr); gap: 1.75rem; margin-top: 2rem; }
+  @media (max-width: 820px){ .hood-grid{ grid-template-columns:1fr; } }
+  .hood-card{ background:var(--surface); border:1px solid var(--border); border-radius: var(--radius); padding: 1.4rem 1.5rem; }
+  .hood-card h3{ font-size:1.05rem; margin-bottom:.6rem; }
+  .hood-card p{ color:var(--muted); font-size:.92rem; }
+  .hood-card code{ background:var(--surface-2); padding:.15rem .4rem; border-radius:5px; font-size:.85em; }
+  .codeblock{
+    margin-top:.9rem; background: var(--surface-2); border-radius:8px; padding: .9rem 1rem;
+    font-family: var(--font-mono); font-size:.82rem; overflow-x:auto; white-space:pre; color:var(--ink);
+  }
+
+  /* ============ Download ============ */
+  .platforms{ display:grid; grid-template-columns: repeat(3,1fr); gap: 1.5rem; }
+  @media (max-width: 880px){ .platforms{ grid-template-columns:1fr; } }
+  .platform-card{
+    background: var(--surface); border:1px solid var(--border); border-radius: var(--radius);
+    padding: 1.75rem; display:flex; flex-direction:column; gap:1rem; box-shadow: var(--shadow);
+  }
+  .platform-card svg{ width:2.1rem; height:2.1rem; color:var(--accent); }
+  .platform-card h3{ font-size:1.15rem; }
+  .platform-card p.desc{ color:var(--muted); font-size:.9rem; flex-grow:1; }
+  .platform-note{ font-size:.8rem; color:var(--muted); border-top:1px solid var(--border); padding-top:.8rem; }
+  .platform-note strong{ color: var(--warm); }
+  .download-fine{ text-align:center; margin-top:2rem; color:var(--muted); font-size:.9rem; }
+
+  /* ============ Footer ============ */
+  footer{ border-top:1px solid var(--border); padding-block: 2.5rem; }
+  .footer-grid{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1.5rem; }
+  .footer-brand{ display:flex; align-items:center; gap:.6rem; font-family: var(--font-display); font-weight:600; }
+  .footer-brand svg{ width:26px; height:26px; }
+  footer nav ul{ display:flex; gap:1.4rem; flex-wrap:wrap; }
+  footer nav a{ text-decoration:none; color:var(--muted); font-size:.88rem; }
+  footer nav a:hover{ color:var(--ink); }
+  .footer-legal{ margin-top:1.5rem; font-size:.8rem; color:var(--muted); }
+
+</style>
+</head>
+
+<body>
+<script>
+  (function(){
+    try{
+      if (localStorage.getItem('lyrebird-mode') === 'expert') {
+        document.body.setAttribute('data-mode','expert');
+      }
+    } catch(e){}
+  })();
+</script>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- shared inline SVG symbols -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="lyre-logo" viewBox="0 0 48 48">
+    <circle cx="24" cy="24" r="24" fill="#0E1412"/>
+    <path d="M24,40 C16,38 9,31 8,22 C7,14 12,7 20,6 C15,9 11,15 12,23 C13,32 18,37 24,39 Z" fill="#F2EFE6"/>
+    <path d="M24,40 C16,38 9,31 8,22 C7,14 12,7 20,6 C15,9 11,15 12,23 C13,32 18,37 24,39 Z" fill="#F2EFE6" transform="scale(-1,1) translate(-48,0)"/>
+    <g stroke="#4FA9A2" stroke-width="1.2" stroke-linecap="round" opacity=".9">
+      <line x1="24" y1="38" x2="24" y2="13"/>
+      <line x1="24" y1="38" x2="18" y2="15"/>
+      <line x1="24" y1="38" x2="30" y2="15"/>
+      <line x1="24" y1="38" x2="13" y2="21"/>
+      <line x1="24" y1="38" x2="35" y2="21"/>
+    </g>
+  </symbol>
+</svg>
+
+<header class="site">
+  <div class="wrap site-nav">
+    <a class="brand" href="#top">
+      <svg><use href="#lyre-logo"/></svg>
+      Lyrebird
+    </a>
+    <ul>
+      <li><a class="navlink" href="#how">How it works</a></li>
+      <li><a class="navlink" href="#accuracy">Accuracy</a></li>
+      <li><a class="navlink" href="#download">Download</a></li>
+    </ul>
+    <div class="controls">
+      <div class="mode-toggle" role="group" aria-label="Detail level">
+        <button type="button" id="btn-simple" aria-pressed="true">Simple</button>
+        <button type="button" id="btn-expert" aria-pressed="false">Expert</button>
+      </div>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+      <a class="btn-download-nav" href="#download">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Offline dictation · macOS, Windows, Linux</p>
+        <h1>Talk. Lyrebird types it — <em>right here</em>, on your own machine.</h1>
+        <p class="lede">No cloud, no account, no subscription. Every word you dictate is turned into text on the computer in front of you, and none of it is ever sent anywhere.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href="https://github.com/freddygaffey/lyrebird/releases/latest/download/Lyrebird.dmg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+            Download for macOS
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/freddygaffey/lyrebird/releases/latest/download/Lyrebird-Setup.exe">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+            Download for Windows
+          </a>
+        </div>
+        <p class="hero-fine">Free and open source. Linux: <a href="https://github.com/freddygaffey/lyrebird">build from source on GitHub</a>. macOS build is unsigned — first time, right-click the app and choose Open.</p>
+      </div>
+      <div class="wave-card">
+        <svg class="wave-graphic" id="waveGraphic" viewBox="0 0 620 190" role="img" aria-label="A sound waveform on the left settling into the written words &quot;chamfer to the louvres&quot; on the right">
+          <g>
+            <rect class="bar" x="14"  y="138" width="8" height="12" rx="4" style="--d:.00s"/>
+            <rect class="bar" x="28"  y="118" width="8" height="32" rx="4" style="--d:.02s"/>
+            <rect class="bar" x="42"  y="90"  width="8" height="60" rx="4" style="--d:.04s"/>
+            <rect class="bar" x="56"  y="62"  width="8" height="88" rx="4" style="--d:.06s"/>
+            <rect class="bar" x="70"  y="40"  width="8" height="110" rx="4" style="--d:.08s"/>
+            <rect class="bar" x="84"  y="52"  width="8" height="98" rx="4" style="--d:.10s"/>
+            <rect class="bar" x="98"  y="78"  width="8" height="72" rx="4" style="--d:.12s"/>
+            <rect class="bar" x="112" y="100" width="8" height="50" rx="4" style="--d:.14s"/>
+            <rect class="bar" x="126" y="70"  width="8" height="80" rx="4" style="--d:.16s"/>
+            <rect class="bar" x="140" y="44"  width="8" height="106" rx="4" style="--d:.18s"/>
+            <rect class="bar" x="154" y="30"  width="8" height="120" rx="4" style="--d:.20s"/>
+            <rect class="bar" x="168" y="56"  width="8" height="94" rx="4" style="--d:.22s"/>
+            <rect class="bar" x="182" y="86"  width="8" height="64" rx="4" style="--d:.24s"/>
+            <rect class="bar" x="196" y="112" width="8" height="38" rx="4" style="--d:.26s"/>
+            <rect class="bar" x="210" y="94"  width="8" height="56" rx="4" style="--d:.28s"/>
+            <rect class="bar" x="224" y="66"  width="8" height="84" rx="4" style="--d:.30s"/>
+            <rect class="bar" x="238" y="48"  width="8" height="102" rx="4" style="--d:.32s"/>
+            <rect class="bar" x="252" y="76"  width="8" height="74" rx="4" style="--d:.34s"/>
+            <rect class="bar" x="266" y="104" width="8" height="46" rx="4" style="--d:.36s"/>
+            <rect class="bar" x="280" y="124" width="8" height="26" rx="4" style="--d:.38s"/>
+            <rect class="bar" x="294" y="140" width="8" height="10" rx="4" style="--d:.40s"/>
+          </g>
+          <text class="wave-label" x="322" y="80" font-size="26">"...chamfer to</text>
+          <text class="wave-label" x="322" y="118" font-size="26">the louvres."</text>
+          <rect class="wave-cursor" x="322" y="128" width="14" height="3"/>
+        </svg>
+        <p class="cap">a waveform, resolving into words</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TRUST STRIP ============ -->
+  <section class="trust">
+    <div class="wrap">
+      <ul>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="16" height="11" rx="2"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/></svg>
+          <span><strong>Runs entirely on your device</strong><span>Nothing you say is ever uploaded, anywhere.</span></span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          <span><strong>No account, ever</strong><span>Install it and start talking. No sign-up.</span></span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8" transform="rotate(45 12 12)"/></svg>
+          <span><strong>No subscription</strong><span>Pay nothing, ever again, for any of it.</span></span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6L3 12l5 6M16 6l5 6-5 6"/></svg>
+          <span><strong>Free &amp; open source</strong><span>MIT licence. Read every line if you like.</span></span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">How it works</p>
+        <h2>Three steps. No workflow to learn.</h2>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <h3>Press your dictation key</h3>
+          <p>Lyrebird starts listening in the background — no window to switch to, no app to bring to the front.</p>
+        </div>
+        <div class="step">
+          <h3>Talk, normally</h3>
+          <p>Pauses, restarts, the odd "um" — dictate the way you'd actually speak. You don't need to perform.</p>
+        </div>
+        <div class="step">
+          <h3>Press it again</h3>
+          <p>Your words are typed wherever your cursor already was — an email, a document, a chat, any app at all.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURE: CUSTOM VOCABULARY ============ -->
+  <section>
+    <div class="wrap feature">
+      <div class="feature-copy">
+        <p class="eyebrow">Custom vocabulary</p>
+        <h2>It learns the words you actually use</h2>
+        <p class="lede">Ordinary dictation software guesses at names, brand terms and specialist language — and guesses wrong, over and over. Lyrebird lets you add your own custom vocabulary, so it stops guessing and simply gets those words right.</p>
+        <div class="tradeoff"><strong>The tradeoff:</strong> you have to teach it. Add a handful of your own words — names, jargon, brand terms — to a simple list, and Lyrebird stops making that mistake. It costs nothing in speed.</div>
+      </div>
+      <div class="transcript-card">
+        <div class="transcript-row">
+          <span class="transcript-tag">Spoken</span>
+          <p>"I used Onshape to model the servo horn, then added a chamfer to the louvres and printed it in PETG on the Bambu Lab printer."</p>
+        </div>
+        <div class="transcript-row">
+          <span class="transcript-tag">Without custom vocabulary</span>
+          <p>"...added a chamfer to the <span class="wrong">louvers</span>..."</p>
+        </div>
+        <div class="transcript-row">
+          <span class="transcript-tag">With custom vocabulary</span>
+          <p>"...added a chamfer to the <span class="right">louvres</span>..."</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURE: CLEANUP ============ -->
+  <section>
+    <div class="wrap feature reverse">
+      <div class="transcript-card">
+        <div class="transcript-row">
+          <span class="transcript-tag">Raw</span>
+          <p>"um so i used onshape to model the servo horn uh and then i added a chamfer to the louvres you know"</p>
+        </div>
+        <div class="transcript-row timing">
+          <span class="transcript-tag" style="margin:0">Cleaned up</span>
+          <span class="time expert-only">1.07s</span>
+        </div>
+        <div class="transcript-row" style="border-top:none; padding-top:0">
+          <p>"So, I used Onshape to model the servo horn, and then I added a chamfer to the louvres."</p>
+        </div>
+      </div>
+      <div class="feature-copy">
+        <p class="eyebrow">Optional grammar cleanup</p>
+        <h2>Clean, readable text — not a raw transcript</h2>
+        <p class="lede">Turn on cleanup and Lyrebird runs a small, private pass — right there on your computer — that strips out filler words and fixes punctuation, so what lands on the page reads the way you meant it.</p>
+        <div class="tradeoff"><strong>The tradeoff:</strong> it costs a few seconds. Your words appear a moment after you stop talking, instead of instantly. Leave it off and you get the raw transcript immediately — already well punctuated on its own. Either way, nothing leaves your computer.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ACCURACY ============ -->
+  <section id="accuracy">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Accuracy</p>
+        <h2>Built to get technical language right</h2>
+      </div>
+
+      <p class="lede accuracy-simple">We tested Lyrebird on a sentence packed with the kind of specialist words that trip up ordinary dictation software — brand names, engineering terms, product names. It got almost all of it right the first time, and the rest after being taught once. That's the difference custom vocabulary makes.</p>
+
+      <div class="expert-only">
+        <div class="wer-callout">
+          <span class="figure">4.0%</span>
+          <p>Word error rate, measured on our own test sentence dense with technical vocabulary. That's our test, not an industry benchmark — treat it as a data point, not a guarantee. We report the real number rather than rounding it up to a nicer-sounding "99% accurate."</p>
+        </div>
+
+        <div class="table-scroll">
+          <table class="bench-table">
+            <caption>Transcription speed, measured on an Apple M5, relative to real time</caption>
+            <thead>
+              <tr><th>Backend</th><th>Speed</th><th>When it's used</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Apple Silicon GPU (Metal, via MLX)</td><td class="num">14.9x real time</td><td>Default on Apple Silicon Macs</td></tr>
+              <tr><td>CPU only</td><td class="num">2.7x real time</td><td>Fallback when no supported GPU is present</td></tr>
+              <tr><td>NVIDIA GPU (CUDA)</td><td class="num">supported</td><td>Windows / Linux machines with an NVIDIA card</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="lede" style="margin-top:1rem; font-size:.9rem;">14.9x real time means 15 seconds of speech comes back as text in about 1 second. The CPU fallback is still comfortably faster than you talk — just less dramatically.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ UNDER THE HOOD (expert only) ============ -->
+  <section class="expert-only">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Under the hood</p>
+        <h2>How the pipeline actually works</h2>
+      </div>
+
+      <div class="diagram">hotkey pressed
+     │
+     ▼
+<span class="stage">microphone audio</span>  <span class="note">— kept in memory, never written to disk</span>
+     │
+     ▼
+<span class="stage">Whisper large-v3-turbo</span>  <span class="note">— local: MLX/Metal on Apple GPU, CUDA on NVIDIA, CPU otherwise</span>
+     │
+     ▼
+<span class="stage">[optional] local cleanup model</span>  <span class="note">— strips filler, fixes punctuation</span>
+     │
+     ▼
+typed into whatever field has focus</div>
+
+      <div class="hood-grid">
+        <div class="hood-card">
+          <h3>Model size is a real tradeoff</h3>
+          <p><code>large-v3-turbo</code> is the default: the most accurate Whisper model that still runs comfortably on a laptop. Smaller variants trade accuracy for lower memory use and a faster response — worth trying on older or memory-constrained hardware. There's no bigger option offered above it; it's already near the top of what Whisper provides.</p>
+        </div>
+        <div class="hood-card">
+          <h3>Configuration is a plain text file</h3>
+          <p>Every setting lives in <code>config/config.ini</code> — hotkey, model choice, cleanup on or off. Custom vocabulary lives in <code>config/dictionary.txt</code>, one term per line. Both are editable by hand, or through the built-in settings page, which binds only to <code>127.0.0.1</code> and is never reachable from the network.</p>
+        </div>
+        <div class="hood-card" style="grid-column: 1 / -1;">
+          <h3>Build it from source</h3>
+          <p>One script installs everything and runs a self-test, on macOS and Linux alike:</p>
+          <div class="codeblock">git clone https://github.com/freddygaffey/lyrebird
+cd lyrebird
+./setup.sh                # install + self-test
+./setup.sh --cleanup      # also install the local cleanup model
+./setup.sh --check        # verify an existing install</div>
+          <p style="margin-top:.8rem">Windows: <code>powershell -ExecutionPolicy Bypass -File .\setup.ps1</code></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DOWNLOAD ============ -->
+  <section id="download">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Get Lyrebird</p>
+        <h2>Free, on every desktop platform</h2>
+      </div>
+
+      <div class="platforms">
+        <div class="platform-card">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.365 1.43c0 1.14-.462 2.113-1.386 2.918-.923.804-1.99 1.257-2.897 1.185-.104-1.107.407-2.25 1.29-3.043.884-.79 2.037-1.31 2.993-1.06zM20.62 17.06c-.36.83-.79 1.6-1.29 2.31-.7.99-1.27 1.68-1.72 2.06-.7.63-1.44.96-2.24.99-.58.02-1.28-.16-2.09-.53-.81-.37-1.55-.55-2.24-.55-.72 0-1.48.18-2.28.55-.8.37-1.44.56-1.93.58-.77.03-1.53-.31-2.28-.99-.48-.4-1.08-1.12-1.79-2.14-.77-1.1-1.4-2.37-1.9-3.83-.53-1.57-.8-3.09-.8-4.56 0-1.68.36-3.13 1.09-4.35.57-.98 1.33-1.75 2.28-2.32.95-.57 1.98-.86 3.08-.88.64 0 1.48.2 2.53.6 1.05.4 1.72.6 2.02.6.22 0 .97-.23 2.24-.7 1.2-.44 2.21-.62 3.04-.55 2.24.18 3.92 1.06 5.04 2.66-2 1.21-2.99 2.9-2.97 5.08.02 1.7.63 3.11 1.83 4.24z"/></svg>
+          <h3>macOS</h3>
+          <p class="desc">Apple Silicon and Intel. Uses the GPU on Apple Silicon for near-instant transcription.</p>
+          <a class="btn btn-primary" href="https://github.com/freddygaffey/lyrebird/releases/latest/download/Lyrebird.dmg">Download .dmg</a>
+          <p class="platform-note"><strong>Unsigned build:</strong> first time you open it, macOS will say the developer can't be verified. Right-click Lyrebird in Applications and choose Open — once only.</p>
+        </div>
+        <div class="platform-card">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.5L9.8 2.2v9.3H0V3.5zm10.9-1.4L24 0v11.4H10.9V2.1zM0 12.7h9.8V22L0 20.6V12.7zm10.9 0H24V24l-13-1.8V12.7z"/></svg>
+          <h3>Windows</h3>
+          <p class="desc">Windows 10 and 11. Uses an NVIDIA GPU automatically if one is present.</p>
+          <a class="btn btn-primary" href="https://github.com/freddygaffey/lyrebird/releases/latest/download/Lyrebird-Setup.exe">Download .exe</a>
+          <p class="platform-note">Run the installer as your normal user — it doesn't need admin rights.</p>
+        </div>
+        <div class="platform-card">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 0c-.7 1-1.2 2-1.3 3.2-.2 1.7.5 3 1.3 4.3.6 1 1.2 2 1 3.2-.1.9-.7 1.6-1.4 2.2-1.4 1.2-2.9 2.4-3.6 4.1-.6 1.5-.5 3.2.3 4.6.9 1.6 2.6 2.5 4.4 2.4 1.7-.1 3.3-1.1 4.1-2.6.6-1.1.8-2.4.5-3.6-.3-1.2-1.1-2.2-1.9-3.1-.7-.8-1.5-1.6-1.7-2.7-.2-1.1.3-2.2.9-3.1.9-1.4 1.9-2.8 1.9-4.5C17 2.3 15.3.4 12.5 0z"/></svg>
+          <h3>Linux</h3>
+          <p class="desc">Works on X11; Wayland blocks global hotkeys (documented on GitHub). Build from source.</p>
+          <a class="btn btn-ghost" href="https://github.com/freddygaffey/lyrebird">View on GitHub</a>
+          <p class="platform-note">No pre-built package yet — <code class="expert-only">setup.sh</code><span class="simple-only">a short script</span> installs everything in a few minutes.</p>
+        </div>
+      </div>
+
+      <p class="download-fine">The app itself is a small download. The first time you open Lyrebird, it downloads what it needs to understand speech (about 1.6&nbsp;GB, once) — after that, it never needs the internet again. <span class="expert-only">App download ≈187&nbsp;MB.</span></p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <a class="footer-brand" href="#top">
+        <svg><use href="#lyre-logo"/></svg>
+        Lyrebird
+      </a>
+      <nav>
+        <ul>
+          <li><a href="https://github.com/freddygaffey/lyrebird">GitHub</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#accuracy">Accuracy</a></li>
+          <li><a href="#download">Download</a></li>
+        </ul>
+      </nav>
+    </div>
+    <p class="footer-legal">Lyrebird is free and open source software, MIT licence. Named after the Australian bird that reproduces any sound it hears with uncanny precision — which is the whole job.</p>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    // ---- Simple / Expert mode ----
+    var body = document.body;
+    var btnSimple = document.getElementById('btn-simple');
+    var btnExpert = document.getElementById('btn-expert');
+
+    function setMode(mode){
+      if (mode === 'expert'){
+        body.setAttribute('data-mode','expert');
+        btnSimple.setAttribute('aria-pressed','false');
+        btnExpert.setAttribute('aria-pressed','true');
+      } else {
+        body.removeAttribute('data-mode');
+        btnSimple.setAttribute('aria-pressed','true');
+        btnExpert.setAttribute('aria-pressed','false');
+      }
+      try{ localStorage.setItem('lyrebird-mode', mode); }catch(e){}
+    }
+    // sync button state with whatever the head-time script already applied
+    setMode(body.getAttribute('data-mode') === 'expert' ? 'expert' : 'simple');
+
+    btnSimple.addEventListener('click', function(){ setMode('simple'); });
+    btnExpert.addEventListener('click', function(){ setMode('expert'); });
+
+    // ---- Theme toggle ----
+    var root = document.documentElement;
+    var themeBtn = document.getElementById('theme-toggle');
+    var themeIcon = document.getElementById('theme-icon');
+    var moonPath = '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>';
+    var sunPath = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+
+    function effectiveTheme(){
+      var explicit = root.getAttribute('data-theme');
+      if (explicit) return explicit;
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    function paintIcon(){
+      themeIcon.innerHTML = effectiveTheme() === 'dark' ? moonPath : sunPath;
+    }
+    paintIcon();
+
+    themeBtn.addEventListener('click', function(){
+      var next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try{ localStorage.setItem('lyrebird-theme', next); }catch(e){}
+      paintIcon();
+    });
+
+    // ---- Waveform reveal ----
+    var graphic = document.getElementById('waveGraphic');
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (graphic && !reduceMotion && 'IntersectionObserver' in window){
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(entry){
+          if (entry.isIntersecting){
+            graphic.classList.add('in-view');
+            io.unobserve(entry.target);
+          }
+        });
+      }, { threshold: .35 });
+      io.observe(graphic);
+    } else if (graphic){
+      graphic.classList.add('in-view');
+    }
+  })();
+</script>
+
+</body>
+</html>

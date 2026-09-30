@@ -1,0 +1,34 @@
+# Engineering, CAD and 3D printing
+Onshape
+Fusion 360
+SolidWorks
+Prusa Slicer
+Bambu Lab
+PETG
+PLA
+ABS
+TPU
+filament
+extruder
+nozzle
+infill
+brim
+raft
+overhang
+chamfer
+fillet
+louvre
+louvres
+tolerance
+print-in-place
+elephant's foot
+G-code
+STL
+STEP file
+parametric
+revolve
+extrude
+perforation
+CNC
+lathe
+kerf

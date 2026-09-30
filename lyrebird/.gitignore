@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+models/
+*.wav
+*.log
+.DS_Store
+config/config.local.ini
+dist/
+build/work/
+build/installer.iss
+*.dmg
+config/benchmark-results.json
+
+# Wrangler build cache — contains the Cloudflare account id and email, and is
+# regenerated on every run. Nothing here belongs in a public repo.
+.wrangler/
