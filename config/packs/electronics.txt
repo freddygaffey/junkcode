@@ -1,0 +1,29 @@
+# Electronics and embedded
+ESP32
+ESP32C3
+Arduino
+Raspberry Pi
+STM32
+MOSFET
+PWM
+GPIO
+I2C
+SPI
+UART
+servo
+stepper motor
+solenoid
+breadboard
+PCB
+solder
+soldering
+flux
+multimeter
+oscilloscope
+capacitor
+resistor
+potentiometer
+LiPo
+18650
+firmware
+microcontroller

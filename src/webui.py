@@ -269,8 +269,16 @@ TEMPLATE = """
     <input type="checkbox" id="lv" name="live" {{ 'checked' if cfg['transcription'].getboolean('live', False) }}>
     <label for="lv">Type words as I speak <span class="fh">Turn off on an older or battery-powered machine.</span></label>
   </div>
-  <label class="expert-only">Update interval <span class="fh">Seconds between passes. Lower feels more immediate but costs more processor.</span>
-    <input type="number" step="0.1" min="0.5" max="5" name="live_interval" value="{{ cfg['transcription'].get('live_interval','1.4') }}"></label>
+  <div class="check">
+    <input type="checkbox" id="hwe" name="hold_while_editing" {{ 'checked' if cfg['transcription'].getboolean('hold_while_editing', True) }}>
+    <label for="hwe">Pause typing while I edit <span class="fh">If you go back to fix a word, new text waits instead of landing in the middle of your correction. It appears once you stop.</span></label>
+  </div>
+  <div class="row expert-only">
+    <div><label>Update interval <span class="fh">Seconds between passes. Lower feels more immediate but uses more processor.</span>
+      <input type="number" step="0.1" min="0.4" max="5" name="live_interval" value="{{ cfg['transcription'].get('live_interval','1.4') }}"></label></div>
+    <div><label>Wait after editing <span class="fh">Seconds of stillness before held text is typed.</span>
+      <input type="number" step="0.1" min="0.3" max="5" name="edit_idle_seconds" value="{{ cfg['transcription'].get('edit_idle_seconds','1.2') }}"></label></div>
+  </div>
 </div>
 
 <div class="card">
@@ -476,6 +484,8 @@ def save():
     cfg["transcription"]["cpu_threads"] = f.get("cpu_threads", "0").strip() or "0"
     cfg["transcription"]["live"] = str("live" in f).lower()
     cfg["transcription"]["live_interval"] = f.get("live_interval", "1.4").strip() or "1.4"
+    cfg["transcription"]["hold_while_editing"] = str("hold_while_editing" in f).lower()
+    cfg["transcription"]["edit_idle_seconds"] = f.get("edit_idle_seconds", "1.2").strip() or "1.2"
     cfg["output"]["delay_before_type"] = f.get("delay_before_type", "0.15").strip() or "0.15"
     cfg["audio"]["max_seconds"] = f.get("max_seconds", "300").strip() or "300"
     cfg["cleanup"]["enabled"] = str("cleanup_enabled" in f).lower()

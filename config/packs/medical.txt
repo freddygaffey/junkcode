@@ -1,0 +1,25 @@
+# Clinical terms commonly mis-transcribed
+hypertension
+hypotension
+tachycardia
+bradycardia
+arrhythmia
+myocardial infarction
+ischaemia
+oedema
+dyspnoea
+pyrexia
+anaemia
+haematoma
+sepsis
+prophylaxis
+analgesia
+anaesthetic
+paracetamol
+ibuprofen
+amoxicillin
+salbutamol
+auscultation
+palpation
+differential diagnosis
+comorbidity

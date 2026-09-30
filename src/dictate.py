@@ -42,7 +42,9 @@ CONFIG_DIR = ROOT / "config"  # replaced at runtime by paths.config_dir()
 sys.path.insert(0, str(ROOT / "src"))
 
 import backends  # noqa: E402  (needs sys.path set above)
+import capture as capture_mod  # noqa: E402
 import cleanup as cleanup_mod  # noqa: E402
+import editguard as editguard_mod  # noqa: E402
 import streaming as streaming_mod  # noqa: E402
 import paths  # noqa: E402
 
@@ -73,58 +75,35 @@ def load_dictionary() -> str:
 
 # --------------------------------------------------------------------------- audio
 class Recorder:
-    """Buffers microphone input until stopped."""
+    """Buffers microphone input until stopped.
+
+    Delegates to capture.py, which uses PortAudio where present and falls back
+    to piping arecord on Linux machines that do not have it.
+    """
 
     def __init__(self, sample_rate: int, channels: int, max_seconds: int,
                  on_chunk=None):
-        import numpy as np  # noqa: F401  (imported for side effect of early failure)
-
         self.sample_rate = sample_rate
         self.channels = channels
         self.max_seconds = max_seconds
-        self._frames: list = []
-        self._stream = None
-        self._started_at = 0.0
         self.on_chunk = on_chunk
+        self._impl = None
+        self._started_at = 0.0
 
     def start(self) -> None:
-        import sounddevice as sd
-
-        self._frames = []
         self._started_at = time.monotonic()
-
-        def callback(indata, frames, time_info, status):
-            if status:
-                print(f"  audio status: {status}", file=sys.stderr)
-            block = indata.copy()
-            self._frames.append(block)
-            if self.on_chunk is not None:
-                mono = block.mean(axis=1) if block.ndim > 1 else block
-                self.on_chunk(mono.astype("float32"))
-            if time.monotonic() - self._started_at > self.max_seconds:
-                raise sd.CallbackStop()
-
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype="float32",
-            callback=callback,
+        self._impl = capture_mod.build(
+            self.sample_rate, self.channels,
+            on_chunk=lambda c: self.on_chunk(c) if self.on_chunk else None,
         )
-        self._stream.start()
+        self._impl.start()
 
     def stop(self):
-        import numpy as np
-
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
-        if not self._frames:
+        if self._impl is None:
             return None
-        audio = np.concatenate(self._frames, axis=0)
-        if audio.ndim > 1:
-            audio = audio.mean(axis=1)          # faster-whisper wants mono
-        return audio.astype("float32")
+        audio = self._impl.stop()
+        self._impl = None
+        return audio
 
 
 # --------------------------------------------------------------------- transcription
@@ -164,6 +143,17 @@ class Transcriber:
 
 # -------------------------------------------------------------------------- cleanup
 _CLEANER = None
+
+# Set by app.py so the menu bar icon can reflect what the listener is doing.
+STATE_HOOK = None
+
+
+def _set_state(state: str) -> None:
+    if STATE_HOOK is not None:
+        try:
+            STATE_HOOK(state)
+        except Exception:                          # noqa: BLE001 - cosmetic only
+            pass
 
 
 def clean_text(text: str, cfg: configparser.ConfigParser) -> str:
@@ -270,6 +260,17 @@ def _make_controller(cfg: configparser.ConfigParser):
 
     live = cfg["transcription"].getboolean("live", False)
     stream_holder: dict = {"st": None}
+    guard = None
+
+    if live and cfg["transcription"].getboolean("hold_while_editing", True):
+        guard = editguard_mod.EditGuard(
+            idle_seconds=cfg["transcription"].getfloat("edit_idle_seconds", 1.2),
+            on_flush=lambda t: emit_raw(t, cfg),
+            on_state=lambda held: _set_state("busy" if held else "listening"),
+        )
+        if not guard.start():
+            print("  (edit protection unavailable)", file=sys.stderr)
+            guard = None
 
     if live:
         def on_chunk(mono):
@@ -287,6 +288,7 @@ def _make_controller(cfg: configparser.ConfigParser):
             if state["recording"] or state["busy"]:
                 return
             state["recording"] = True
+        _set_state("listening")
         print("● recording — press again to stop" if mode == "toggle" else "● recording")
         if live:
             typed_any = {"v": False}
@@ -296,7 +298,10 @@ def _make_controller(cfg: configparser.ConfigParser):
                 text = (" " if typed_any["v"] else "") + " ".join(words)
                 typed_any["v"] = True
                 try:
-                    emit_raw(text, cfg)
+                    if guard is not None:
+                        guard.submit(text)        # held back if you are editing
+                    else:
+                        emit_raw(text, cfg)
                 except Exception as exc:          # noqa: BLE001
                     print(f"  [live] could not type: {exc}", file=sys.stderr)
 
@@ -321,13 +326,17 @@ def _make_controller(cfg: configparser.ConfigParser):
             recorder.stop()
             try:
                 text = st.finish() if st else ""
+                if guard is not None:
+                    guard.flush()                 # never lose held words
                 print(f"  live: {len(text.split())} words")
             finally:
+                _set_state("idle")
                 stream_holder["st"] = None
                 with lock:
                     state["busy"] = False
             return
 
+        _set_state("busy")
         print("… transcribing")
         try:
             audio = recorder.stop()
@@ -343,6 +352,7 @@ def _make_controller(cfg: configparser.ConfigParser):
             text = clean_text(text, cfg)
             emit(text, cfg)
         finally:
+            _set_state("idle")
             with lock:
                 state["busy"] = False
 

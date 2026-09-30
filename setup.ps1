@@ -36,10 +36,23 @@ if (-not (Test-Path $Venv)) { Say "Creating virtualenv"; python -m venv $Venv }
 else { Ok "virtualenv exists" }
 
 Say "Installing Python dependencies"
-& $Pip install --quiet --upgrade pip
+# pip cannot replace itself while running as pip.exe; go via python -m
+& $Py -m pip install --quiet --upgrade pip
 & $Pip install --quiet -r (Join-Path $Root "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Die "pip install failed" }
 Ok "dependencies installed"
+
+# ctranslate2 does not vendor the CUDA runtime; without these an NVIDIA GPU is
+# detected but every transcription fails on a missing cublas DLL.
+Say "Checking for an NVIDIA GPU"
+$hasNvidia = $null -ne (Get-Command nvidia-smi -ErrorAction SilentlyContinue)
+if ($hasNvidia) {
+    Say "NVIDIA GPU found - installing CUDA runtime libraries"
+    & $Py -m pip install --quiet nvidia-cublas-cu12 nvidia-cudnn-cu12
+    if ($LASTEXITCODE -eq 0) { Ok "CUDA runtime installed" } else { Warn "CUDA runtime install failed - CPU will still work" }
+} else {
+    Ok "no NVIDIA GPU - using CPU"
+}
 
 if ($Cleanup) {
     if (Get-Command ollama -ErrorAction SilentlyContinue) { Ok "ollama present" }

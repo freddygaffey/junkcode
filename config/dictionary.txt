@@ -1,60 +1,27 @@
-# Custom vocabulary — one term per line. Lines starting with # are ignored.
+# Your word list
 #
-# These are fed to Whisper as an initial prompt, which biases it towards
-# recognising them. This is the single highest-value file in this repo:
-# it is what stops "servo" being transcribed as "server".
+# One word or phrase per line. Lines starting with # are notes and are ignored.
 #
-# Add any term you say often that is unusual, technical, or a proper noun.
+# This list is fed to the speech engine as a hint, biasing it towards these
+# spellings. It is the single most effective setting in Lyrebird: it is what
+# stops "servo" being written as "server", or a colleague's name being mangled
+# every single time.
+#
+# WHAT TO PUT HERE
+#   - names of people you talk about
+#   - company, product and project names
+#   - technical terms specific to your work
+#   - anything you have seen transcribed wrongly more than once
+#
+# WHAT NOT TO PUT HERE
+#   - ordinary English words. The engine already knows them, and every entry
+#     uses part of a limited budget (about 224 tokens, roughly 90 short terms).
+#     Filling it with common words pushes out the terms that actually need help.
+#
+# READY-MADE LISTS
+#   config/packs/ contains lists for common fields - engineering, software,
+#   medicine, law, academia, business. Open one, copy the lines you need.
+#   Do not paste a whole pack in: you will exhaust the budget.
 
-# --- 3D printing / CAD ---
-Onshape
-InDesign
-Prusa Slicer
-Bambu Lab
-PETG
-PLA
-TPU
-filament
-louvre
-louvres
-chamfer
-chamfered
-chamfering
-fillet
-brim
-infill
-extrude
-revolve
-perforations
-print-in-place
-elephant's foot
-overhang
-STL
-G-code
-slicer
-tolerance
-
-# --- Electronics ---
-ESP32
-ESP32C3
-MOSFET
-PWM
-SG90
-servo
-servo horn
-microcontroller
-solder
-soldering
-flux
-breadboard
-PCB
-18650
-threaded insert
-
-# --- Project specific ---
-L-plate
-P-plate
-MDP
-logbook
-NESA
-HSC
+# --- replace these examples with your own ---
+Lyrebird

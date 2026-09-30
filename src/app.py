@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing
+import os
 import socket
 import sys
 import threading
@@ -23,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import paths  # noqa: E402
+import tray as tray_mod  # noqa: E402
 
 APP_NAME = "Lyrebird"          # <- change here to rename everywhere
 WINDOW_W, WINDOW_H = 900, 860
@@ -55,7 +57,7 @@ def start_settings_server(port: int) -> None:
     ).start()
 
 
-def start_dictation() -> None:
+def start_dictation(indicator=None) -> None:
     """Run the hotkey listener in the background.
 
     Deliberately non-fatal: if the microphone or Accessibility permission is
@@ -65,9 +67,14 @@ def start_dictation() -> None:
         try:
             import dictate
 
-            dictate.run_listener(dictate.load_config())
+            cfg = dictate.load_config()
+            if indicator is not None:
+                dictate.STATE_HOOK = indicator.set_state
+            dictate.run_listener(cfg)
         except Exception as exc:                  # noqa: BLE001
             print(f"[dictation] not started: {type(exc).__name__}: {exc}", file=sys.stderr)
+            if indicator is not None:
+                indicator.set_state("idle")
 
     threading.Thread(target=runner, daemon=True).start()
 
@@ -78,6 +85,8 @@ def main() -> None:
                     help="open in the default browser instead of a native window")
     ap.add_argument("--no-dictation", action="store_true",
                     help="settings only; do not start the hotkey listener")
+    ap.add_argument("--no-tray", action="store_true",
+                    help="do not show the menu bar indicator")
     # Ignore anything we do not recognise: a frozen app can be re-launched by the
     # OS or a child process with extra argv, and a hard argparse exit would kill it.
     args, _unknown = ap.parse_known_args()
@@ -89,8 +98,17 @@ def main() -> None:
     if not wait_for_server(port):
         sys.exit("Settings server failed to start.")
 
+    indicator = None
+    if not args.no_tray:
+        indicator = tray_mod.Indicator(
+            on_settings=lambda: __import__("webbrowser").open(f"http://127.0.0.1:{port}"),
+            on_quit=lambda: os._exit(0),
+        )
+        if not indicator.start():
+            indicator = None
+
     if not args.no_dictation:
-        start_dictation()
+        start_dictation(indicator)
 
     url = f"http://127.0.0.1:{port}"
     if args.browser:

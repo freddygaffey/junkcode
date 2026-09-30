@@ -17,13 +17,18 @@ hidden = (
     + collect_submodules("webview")
     + collect_submodules("mlx_lm")
     + collect_submodules("mlx")
-    + ["flask", "pynput", "sounddevice", "requests", "ctranslate2"]
+    + ["flask", "pynput", "sounddevice", "requests", "ctranslate2",
+       # local modules imported dynamically, which Analysis cannot see
+       "paths", "backends", "capture", "cleanup", "streaming", "tray",
+       "dictate", "webui", "benchmark"]
 )
 
 datas = [
     (str(ROOT / "config" / "config.ini"), "config"),
     (str(ROOT / "config" / "dictionary.txt"), "config"),
 ]
+for pack in sorted((ROOT / "config" / "packs").glob("*.txt")):
+    datas.append((str(pack), "config/packs"))
 datas += collect_data_files("faster_whisper")
 datas += collect_data_files("mlx_whisper")
 datas += collect_data_files("webview")

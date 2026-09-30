@@ -34,6 +34,41 @@ MLX_REPOS = {
 }
 
 
+def _register_windows_cuda_dlls() -> None:
+    """Put NVIDIA's CUDA DLLs on the search path.
+
+    pip installs cublas/cudnn under site-packages/nvidia/*/bin, but since Python
+    3.8 Windows no longer searches PATH for extension DLLs. Without this,
+    ctranslate2 reports a GPU, then fails every transcription with
+    "cublas64_12.dll is not found" - detected but unusable.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import site
+
+        for base in site.getsitepackages():
+            nvidia = Path(base) / "nvidia"
+            if not nvidia.is_dir():
+                continue
+            for binary_dir in nvidia.glob("*/bin"):
+                path = str(binary_dir)
+                # Two mechanisms, because they cover different loaders:
+                # add_dll_directory serves Python's own extension loading, while
+                # ctranslate2 calls LoadLibrary internally, which searches PATH.
+                try:
+                    os.add_dll_directory(path)
+                except (OSError, AttributeError):
+                    pass
+                if path not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = path + os.pathsep + os.environ.get("PATH", "")
+    except Exception:                              # noqa: BLE001 - best effort
+        pass
+
+
+_register_windows_cuda_dlls()
+
+
 def is_apple_silicon() -> bool:
     return sys.platform == "darwin" and platform.machine() == "arm64"
 

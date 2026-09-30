@@ -83,3 +83,33 @@ rm -rf .venv
 
 Your settings survive: `config/` is untouched, and `config/backups/` holds the
 last 20 versions.
+
+## The hotkey stops working after an update (macOS)
+
+macOS ties Accessibility permission to an application's **code signature**, not its
+path or name. Every unsigned rebuild produces a different signature, so macOS sees
+a different application and the permission you granted no longer applies.
+
+Symptom: after installing a new version, F5 silently does nothing, and the log
+says `This process is not trusted!`
+
+Fix: *System Settings > Privacy & Security > Accessibility*, remove the old
+Lyrebird entry with the minus button, then add the new one.
+
+The permanent fix is a stable signing identity, which needs a paid Apple
+Developer account. Until then, expect to re-grant after each update. Verified:
+granting permission to one build, then replacing it, reproduced the failure
+immediately.
+
+## Windows: the GPU is detected but transcription fails
+
+Symptom: `Library cublas64_12.dll is not found or cannot be loaded`
+
+The engine ships without NVIDIA's CUDA runtime. Install the libraries:
+
+```
+.venv\Scripts\python.exe -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+```
+
+CPU transcription is unaffected and needs nothing extra - on a test sentence
+dense with technical vocabulary it scored 0% word error rate on Windows.

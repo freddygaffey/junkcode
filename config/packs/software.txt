@@ -1,0 +1,29 @@
+# Software development
+API
+SDK
+CLI
+repo
+repository
+commit
+merge request
+pull request
+refactor
+regression
+middleware
+endpoint
+webhook
+JSON
+YAML
+SQL
+Postgres
+Redis
+Kubernetes
+Docker
+nginx
+TypeScript
+Python
+Rust
+async
+mutex
+race condition
+stack trace
