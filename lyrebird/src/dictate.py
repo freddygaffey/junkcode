@@ -258,6 +258,23 @@ def emit_raw(text: str, cfg: configparser.ConfigParser) -> None:
         Controller().type(text)
 
 
+def erase(count: int) -> None:
+    """Send `count` backspaces to the focused field.
+
+    Used by the second pass to take back text the live pass typed. Deliberately
+    the only place that deletes anything, and callers must be certain the cursor
+    is still where they left it — see the guards in finish().
+    """
+    if count <= 0:
+        return
+    from pynput.keyboard import Controller, Key
+
+    kb = Controller()
+    for _ in range(count):
+        kb.press(Key.backspace)
+        kb.release(Key.backspace)
+
+
 def _emit_clipboard(text: str) -> None:
     """Copy then paste, restoring the previous clipboard afterwards."""
     import subprocess
@@ -325,6 +342,11 @@ def _make_controller(cfg: configparser.ConfigParser):
             print("  (edit protection unavailable)", file=sys.stderr)
             guard = None
 
+    # How many characters the live pass has typed. The second pass needs this to
+    # take them back; it is the only safe way to know, since the text went into
+    # somebody else's window and cannot be read back.
+    typed = {"chars": 0}
+
     if live:
         def on_chunk(mono):
             st = stream_holder["st"]
@@ -350,6 +372,7 @@ def _make_controller(cfg: configparser.ConfigParser):
                 # Type as the words are confirmed, so text appears while talking.
                 text = (" " if typed_any["v"] else "") + " ".join(words)
                 typed_any["v"] = True
+                typed["chars"] += len(text)
                 try:
                     if guard is not None:
                         guard.submit(text)        # held back if you are editing
@@ -368,6 +391,59 @@ def _make_controller(cfg: configparser.ConfigParser):
             stream_holder["st"].start()
         recorder.start()
 
+    def _second_pass(audio, live_text: str) -> None:
+        """Re-transcribe the whole recording and correct what the live pass typed.
+
+        Live transcription runs on partial audio, so it commits words before the
+        model has heard the end of the sentence — it cannot use later context to
+        fix an earlier guess, and it never retracts. Running once more over the
+        complete recording gets the accurate version. Where they differ, the
+        typed text is taken back and replaced.
+
+        This is the only code that deletes anything, so it refuses unless it is
+        certain the cursor is still where the live pass left it:
+
+          - the guard must not be holding text, and must not have seen you type
+            or click since (otherwise the backspaces land in your own edits)
+          - the character count must match what we believe we typed
+          - the two passes must actually differ, after normalising whitespace
+
+        Any doubt and it leaves the live text alone: a slightly wrong sentence is
+        a far better failure than eating the surrounding paragraph.
+        """
+        if not cfg["transcription"].getboolean("second_pass", True):
+            return
+        if audio is None or len(audio) < 1600:          # under ~0.1s
+            return
+        count = typed["chars"]
+        if count <= 0:
+            return
+        if guard is not None and not guard.safe_to_type():
+            print("  second pass skipped: you were typing", file=sys.stderr)
+            return
+
+        _set_state("busy")
+        print("… second pass")
+        try:
+            final = transcriber.transcribe(audio)
+            final = clean_text(final, cfg)
+        except Exception as exc:                        # noqa: BLE001
+            print(f"  second pass failed: {exc}", file=sys.stderr)
+            return
+
+        if not final.strip():
+            return
+        if " ".join(final.split()) == " ".join(live_text.split()):
+            print("  second pass: no change")
+            return
+
+        if guard is not None:
+            # Our own backspaces and typing must not look like you editing.
+            guard.expect_own_output(3.0)
+        erase(count)
+        emit_raw(final, cfg)
+        print(f"  corrected: {final[:80]}")
+
     def finish():
         with lock:
             if not state["recording"]:
@@ -376,15 +452,18 @@ def _make_controller(cfg: configparser.ConfigParser):
             state["busy"] = True
         if live:
             st = stream_holder["st"]
-            recorder.stop()
+            # Keep the audio: the second pass re-transcribes the whole recording.
+            audio = recorder.stop()
             try:
                 text = st.finish() if st else ""
                 if guard is not None:
                     guard.flush()                 # never lose held words
                 print(f"  live: {len(text.split())} words")
+                _second_pass(audio, text)
             finally:
                 _set_state("idle")
                 stream_holder["st"] = None
+                typed["chars"] = 0
                 with lock:
                     state["busy"] = False
             return

@@ -110,6 +110,15 @@ class EditGuard:
             if held == 1:
                 print("  [hold] you are editing — text is waiting", flush=True)
 
+    def safe_to_type(self) -> bool:
+        """True when output can be sent without landing in the user's own edits.
+
+        Public because the second pass needs it: that is the one code path that
+        DELETES text, so it must be able to ask whether the cursor is still where
+        it left it before sending backspaces.
+        """
+        return self._can_type()
+
     def _can_type(self) -> bool:
         if self._paused:
             return False
