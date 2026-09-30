@@ -207,8 +207,15 @@ def test_never_erases_more_than_was_typed(rig_factory, groups, hold):
     r = rig_factory(cfg=make_cfg(hold=hold), final="Completely different words here")
     r.live_emit(*groups)
     r.finish()
-    assert r.screen.text.startswith(PREFIX)
-    assert r.screen.text == PREFIX + "Completely different words here"
+    assert r.screen.text.startswith(PREFIX), r.screen.text
+    if hold:
+        # With the guard watching, the correction replaces the live text exactly.
+        assert r.screen.text == PREFIX + "Completely different words here"
+    else:
+        # Without it nothing observes the keyboard, so the second pass declines
+        # rather than delete blind. The live text stays.
+        assert r.screen.erased == 0, r.screen.text
+        assert "Completely different" not in r.screen.text
 
 
 # ------------------------------------------------- held text flushed later
@@ -298,17 +305,29 @@ def test_user_text_typed_between_live_output_and_stop_is_not_erased(rig_factory)
     a blind erase(count) deletes their words."""
     r = rig_factory(final="Hello world.")
     r.live_emit(["hello", "world"])
-    r.screen.type(" and my own words")          # user's keyboard; guard idle again
-    r.guard._last_input = time.monotonic() - 5
+    r.screen.type(" and my own words")          # user's keyboard...
+    # The guard ignores input for ~0.4s after its own write, so it does not
+    # mistake its own synthetic keystrokes for the user. Close that window first:
+    # the user is typing after our output settled, not during it.
+    r.guard._own_output_until = 0
+    r.guard._note_input()                       # ...which the pynput listener reports
+    r.guard._last_input = time.monotonic() - 5  # then they pause, so the guard is idle
     r.finish()
     assert "and my own words" in r.screen.text, r.screen.text
 
 
-def test_no_guard_means_no_safety_check_documented(rig_factory):
-    """hold_while_editing=false: nothing can veto the erase. Locks in current
-    behaviour so a change is noticed."""
+def test_no_guard_means_no_second_pass(rig_factory):
+    """hold_while_editing=false: the second pass must decline entirely.
+
+    Without the guard nothing is watching the keyboard, so there is no way to
+    know the caret is still where the live pass left it — and this is the one
+    code path that DELETES text in a window it cannot see. It used to erase
+    anyway, with no check at all. Declining leaves the live text in place, which
+    is at worst slightly wrong rather than destructive.
+    """
     r = rig_factory(cfg=make_cfg(hold=False), final="Different.")
     assert r.guard is None
     r.live_emit(["hello"])
     r.finish()
-    assert r.screen.text == PREFIX + "Different."
+    assert r.screen.text == PREFIX + "hello", r.screen.text
+    assert r.screen.erased == 0

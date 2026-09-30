@@ -345,7 +345,12 @@ def _make_controller(cfg: configparser.ConfigParser):
     # How many characters the live pass has typed. The second pass needs this to
     # take them back; it is the only safe way to know, since the text went into
     # somebody else's window and cannot be read back.
-    typed = {"chars": 0}
+    # chars: how many characters the live pass actually typed — the second pass
+    # needs it to take them back, and text typed into someone else's window
+    # cannot be read back to check.
+    # since: when the live pass first wrote. Any user keypress or click after
+    # that means the cursor may have moved, so the erase is no longer safe.
+    typed = {"chars": 0, "seq": None}
 
     if live:
         def on_chunk(mono):
@@ -371,15 +376,26 @@ def _make_controller(cfg: configparser.ConfigParser):
             def emit(words):
                 # Type as the words are confirmed, so text appears while talking.
                 text = (" " if typed_any["v"] else "") + " ".join(words)
-                typed_any["v"] = True
-                typed["chars"] += len(text)
                 try:
                     if guard is not None:
                         guard.submit(text)        # held back if you are editing
                     else:
                         emit_raw(text, cfg)
                 except Exception as exc:          # noqa: BLE001
+                    # Count only what was actually WRITTEN. Counting first meant a
+                    # failed write (no xclip, pynput refused) still incremented the
+                    # total, and the second pass then erased that many characters
+                    # of the user's own preceding text.
                     print(f"  [live] could not type: {exc}", file=sys.stderr)
+                    return
+                if not typed_any["v"] and guard is not None:
+                    # Snapshot the user-input counter at the moment the live
+                    # pass first writes. Anything above this later means the
+                    # user has touched the keyboard or mouse since, so the caret
+                    # may have moved and the erase is unsafe.
+                    typed["seq"] = guard.input_seq()
+                typed_any["v"] = True
+                typed["chars"] += len(text)
 
             stream_holder["st"] = streaming_mod.StreamingTranscriber(
                 transcriber.backend,
@@ -418,8 +434,27 @@ def _make_controller(cfg: configparser.ConfigParser):
         count = typed["chars"]
         if count <= 0:
             return
-        if guard is not None and not guard.safe_to_type():
-            print("  second pass skipped: you were typing", file=sys.stderr)
+        def cursor_still_ours() -> bool:
+            """No user input since the live pass started writing."""
+            if guard is None:
+                # Nothing is watching the keyboard, so there is no way to know the
+                # cursor has not moved. Refuse rather than guess: this code
+                # deletes text in a window it cannot see.
+                return False
+            if not guard.safe_to_type():
+                return False
+            # Not merely "idle for 1.2s" — ANY keypress or click since the live
+            # text landed means the caret may have moved, and the backspaces
+            # would eat whatever the user typed instead.
+            #
+            # A counter, not a timestamp: the user typing and then pausing makes
+            # their keystroke look older than the text it came after, and a
+            # clock comparison then says "safe" when it is not.
+            return typed["seq"] is not None and guard.input_seq() == typed["seq"]
+
+        if not cursor_still_ours():
+            print("  second pass skipped: you typed since the live text",
+                  file=sys.stderr)
             return
 
         _set_state("busy")
@@ -437,9 +472,17 @@ def _make_controller(cfg: configparser.ConfigParser):
             print("  second pass: no change")
             return
 
-        if guard is not None:
-            # Our own backspaces and typing must not look like you editing.
-            guard.expect_own_output(3.0)
+        # Check AGAIN, immediately before deleting anything. The check above ran
+        # before transcribe(), which takes seconds — ample time to alt-tab or
+        # start typing, after which the backspaces would land in whatever has
+        # focus now.
+        if not cursor_still_ours():
+            print("  second pass abandoned: you typed during transcription",
+                  file=sys.stderr)
+            return
+
+        # Our own backspaces and typing must not look like you editing.
+        guard.expect_own_output(3.0)
         erase(count)
         emit_raw(final, cfg)
         print(f"  corrected: {final[:80]}")

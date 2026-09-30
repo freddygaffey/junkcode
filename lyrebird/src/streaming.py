@@ -158,6 +158,13 @@ class StreamingTranscriber:
                 self._all.extend(leftover)
                 self.on_words(leftover)
             with self._lock:
-                self._buf = np.zeros(0, dtype="float32")
+                # Drop only what was actually transcribed, NOT the whole buffer.
+                # `audio` was snapshotted before the pass, and a pass takes
+                # seconds — on a slower-than-realtime backend, several. Everything
+                # add_audio() appended in the meantime is still unspoken-for, and
+                # clearing outright silently lost it: every rollover swallowed up
+                # to a pass worth of speech, so any dictation past max_buffer_s
+                # came out with gaps.
+                self._buf = self._buf[len(audio):]
             self._prev = []
             self._committed_in_buf = 0

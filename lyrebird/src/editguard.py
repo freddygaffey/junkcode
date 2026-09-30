@@ -31,6 +31,13 @@ class EditGuard:
 
         self._queue: list[str] = []
         self._lock = threading.Lock()
+        # Held across an actual write, so flush() can wait for one in flight.
+        self._write_lock = threading.Lock()
+        # Counts real user input. A COUNTER rather than only a timestamp,
+        # because "has the user touched anything since I wrote?" cannot be
+        # answered by a clock: an idle period after the keypress makes the
+        # timestamp look older than the text it came after.
+        self._input_seq = 0
         self._last_input = 0.0
         self._paused = False
         self._stop = threading.Event()
@@ -85,19 +92,38 @@ class EditGuard:
         return self._paused
 
     # ------------------------------------------------------------------- input
+    def input_seq(self) -> int:
+        """How many times the user has typed or clicked.
+
+        The second pass records this before it writes and compares afterwards.
+        Only an increase can tell it the caret may have moved — a timestamp
+        cannot, because the user pausing makes their keypress look old.
+        """
+        return self._input_seq
+
     def _note_input(self) -> None:
         # Ignore the keystrokes we synthesise ourselves, or the guard would
         # treat its own typing as the user editing and never release anything.
         if time.monotonic() < self._own_output_until:
             return
         self._last_input = time.monotonic()
+        self._input_seq += 1
 
     def expect_own_output(self, seconds: float) -> None:
         self._own_output_until = time.monotonic() + seconds
 
     # ------------------------------------------------------------------ output
     def submit(self, text: str) -> None:
-        """Offer transcribed text. Typed now, or queued if the user is busy."""
+        """Offer transcribed text. Typed now, or queued if the user is busy.
+
+        CONTRACT: the caller owns spacing. Whatever is submitted is written
+        verbatim, and queued pieces are concatenated with nothing between them.
+
+        That matters because the second pass counts the characters it typed in
+        order to take them back. A guard that inserted its own separators would
+        write characters nobody counted, and the erase would then fall short and
+        leave fragments of the live text behind.
+        """
         if not text:
             return
         if self._can_type():
@@ -109,6 +135,15 @@ class EditGuard:
             self.on_state(True)
             if held == 1:
                 print("  [hold] you are editing — text is waiting", flush=True)
+
+    def last_input_at(self) -> float:
+        """When the user last typed or clicked, on the monotonic clock.
+
+        Public because the second pass needs more than "is it idle now": it must
+        know whether ANY input happened since it wrote, since a keypress moves
+        the caret and makes its backspaces land on the user's own text.
+        """
+        return self._last_input
 
     def safe_to_type(self) -> bool:
         """True when output can be sent without landing in the user's own edits.
@@ -125,16 +160,32 @@ class EditGuard:
         return (time.monotonic() - self._last_input) >= self.idle_seconds
 
     def _write(self, text: str) -> None:
-        # Reserve a window so our own keystrokes are not mistaken for the user's.
-        self.expect_own_output(0.4 + len(text) * 0.01)
-        self.on_flush(text)
+        # Serialised against flush(), so a caller that has called flush() can
+        # trust that everything is on screen before it acts. Typing takes real
+        # time — pynput sends keystrokes one at a time — and the second pass
+        # sends backspaces immediately afterwards.
+        with self._write_lock:
+            # Reserve a window so our own keystrokes are not mistaken for the
+            # user's.
+            self.expect_own_output(0.4 + len(text) * 0.01)
+            self.on_flush(text)
 
     def flush(self) -> None:
         with self._lock:
             pending, self._queue = self._queue, []
         if pending:
-            self._write(" ".join(pending))
+            # Verbatim, per the contract on submit(): the caller already spaces
+            # its pieces, and inserting more here would write characters the
+            # second pass has not counted.
+            self._write("".join(pending))
             self.on_state(False)
+        else:
+            # Nothing of ours to write, but the drain thread may be mid-write.
+            # Wait it out: flush() returning has to mean "everything held is on
+            # screen", or the second pass sends backspaces into text that is
+            # still arriving.
+            with self._write_lock:
+                pass
 
     def _drain(self) -> None:
         while not self._stop.is_set():

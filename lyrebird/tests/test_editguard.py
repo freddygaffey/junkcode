@@ -35,8 +35,12 @@ def test_holds_while_input_is_recent():
 def test_flush_releases_held_text_joined():
     g, out, states = make(idle=10)
     g._note_input()
+    # The caller owns spacing (see EditGuard.submit): pieces are submitted
+    # already spaced and concatenated verbatim. The guard must not insert
+    # separators of its own — the second pass counts what was typed so it can
+    # erase exactly that much, and invented characters make the count wrong.
     g.submit("hello")
-    g.submit("world")
+    g.submit(" world")
     g.flush()
     assert out == ["hello world"]
     assert states[-1] is False
